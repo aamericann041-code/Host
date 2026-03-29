@@ -1,0 +1,13 @@
+start - تشغيل البوت وعرض القائمة الرئيسية
+ping - اختبار سرعة الاتصال
+updateschannel - قناة التحديثات
+uploadfile - رفع ملف جديد
+checkfiles - عرض وإدارة ملفاتك
+botspeed - اختبار سرعة البوت وحالته
+contactowner - التواصل مع المالك
+statistics - إحصائيات البوت
+subscriptions - إدارة الاشتراكات (أدمن)
+broadcast - بث رسالة لكل المستخدمين (أدمن)
+lockbot - قفل/فتح البوت (أدمن)
+adminpanel - لوحة إدارة الأدمنية (أدمن)
+runningallcode - تشغيل كل الأكواد المحفوظة (أدمن)
