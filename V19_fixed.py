@@ -85,7 +85,7 @@ def keep_alive():
 # --- End Flask Keep Alive ---
 
 # --- Configuration ---
-TOKEN = '8553199423:AAH4NVlWl89ePPFr5XtOzage0WtRTLJEtrw' # توكن البوت
+TOKEN = '7978840901:AAGcbR-va4DyRi6vZ1-ZKz11AspEg-cwfFk' # توكن البوت
 OWNER_ID = 7970883512 # ID المالك
 ADMIN_ID = 8206539702 # ID الأدمن
 YOUR_USERNAME = '@I_tt_6' # يوزر المالك
@@ -137,13 +137,11 @@ COMMAND_BUTTONS_LAYOUT_USER_SPEC = [
     ["📊 الإحصائيات", "📞 التواصل مع المالك"]
 ]
 ADMIN_COMMAND_BUTTONS_LAYOUT_USER_SPEC = [
-    ["🔄 تحديث"],
     ["📢 قناة التحديثات"],
     ["📤 رفع ملف", "📂 فحص الملفات"],
     ["🌐 مواقعي", "⚡ سرعة البوت"],
     ["📊 الإحصائيات", "💳 الاشتراكات"],
     ["📢 بث رسالة", "🔒 قفل البوت"],
-    ["🚫 حظر مستخدم", "✅ فك حظر مستخدم"],
     ["🟢 تشغيل كل الأكواد", "👑 لوحة الأدمن"],
     ["📞 التواصل مع المالك"]
 ]
@@ -725,6 +723,98 @@ TELEGRAM_MODULES = {
 # --- End Automatic Package Installation & Script Running ---
 
 
+# --- Security Scanner ---
+DANGEROUS_PATTERNS = [
+    # === سرقة الملفات بالكامل ===
+    (r'os\.walk\s*\(\s*["\']?\.\s*["\']?\s*\)', "os.walk('.') - مسح كل الملفات"),
+    (r'os\.walk\s*\(\s*["\']?/\s*["\']?\s*\)', "os.walk('/') - مسح الجذر"),
+    (r'zipfile\.ZipFile.*["\']w["\']', "إنشاء ملف ZIP للضغط"),
+    (r'zipf\.write\s*\(file_path\)', "ضغط ملفات الخادم"),
+
+    # === إرسال ملفات لأكونت خارجي ===
+    (r'send_document\s*\(\s*USER_ID|send_document\s*\(\s*["\']?\d{7,}', "send_document لـ ID خارجي"),
+    (r'TeleBot\s*\([^)]*API_TOKEN\s*\)|telebot\.TeleBot\s*\([^T]', "إنشاء بوت بتوكن مختلف"),
+    (r'bot\s*=\s*telebot\.TeleBot\s*\([^)]*["\'][0-9]{8,}:', "توكن بوت خارجي ثابت في الكود"),
+
+    # === قراءة توكنات وبيانات حساسة ===
+    (r'os\.environ\.get\s*\(["\']TOKEN["\']|os\.environ\[["\']TOKEN', "سرقة TOKEN من البيئة"),
+    (r'open\s*\(["\'][^"\']*\.env["\']', "قراءة ملف .env"),
+    (r'open\s*\(["\'][^"\']*bot_data\.db', "قراءة قاعدة البيانات"),
+    (r'open\s*\(["\'][^"\']*\.db["\']', "قراءة ملف database"),
+
+    # === تنفيذ أوامر النظام الخطيرة ===
+    (r'os\.system\s*\(', "os.system - تنفيذ أوامر"),
+    (r'subprocess\.[A-Za-z]+\s*\([^)]*shell\s*=\s*True', "shell=True - خطر تنفيذ أوامر"),
+    (r'eval\s*\(', "eval - تنفيذ كود مجهول"),
+    (r'exec\s*\((?!ute)', "exec - تنفيذ كود مجهول"),
+
+    # === الخروج من المجلد المسموح ===
+    (r'["\']\.\./', "مسار نسبي خارجي ../"),
+    (r'os\.chdir\s*\(', "os.chdir - تغيير المجلد"),
+
+    # === JS ===
+    (r'require\s*\(["\']child_process["\']\)', "child_process في JS"),
+    (r'process\.env\s*\.\s*TOKEN', "سرقة TOKEN في JS"),
+    (r'fs\.(readdir|readdirSync)\s*\(["\']\.', "مسح المجلد في JS"),
+    (r'require\s*\(["\']fs["\']\).*createWriteStream', "كتابة ملفات في JS"),
+]
+
+DANGEROUS_COMBINATIONS = [
+    # الهجوم الكامل: مسح + ضغط + إرسال
+    (
+        [r'os\.walk', r'zipfile\.ZipFile', r'send_document|bot\.send_document'],
+        "🚨 هجوم سرقة الملفات الكامل"
+    ),
+    # بوت خارجي + إرسال ملفات
+    (
+        [r'telebot\.TeleBot\s*\(', r'send_document\s*\(', r'os\.walk|os\.listdir'],
+        "🚨 بوت خارجي يسرق الملفات"
+    ),
+    # قراءة env + إرسال خارجي
+    (
+        [r'os\.environ', r'requests\.(post|get)|send_message|send_document'],
+        "🚨 سرقة متغيرات البيئة وإرسالها"
+    ),
+    # subprocess + مسح + شبكة
+    (
+        [r'subprocess', r'os\.walk|os\.listdir', r'socket|requests|urllib'],
+        "🚨 اختراق + مسح + إرسال شبكي"
+    ),
+]
+
+def scan_file_security(file_path, file_name):
+    """
+    Scan uploaded file for malicious patterns before execution.
+    Returns (is_safe, list_of_threats)
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+    except Exception as e:
+        logger.error(f"Security scan: couldn't read {file_name}: {e}")
+        return True, []
+
+    threats = []
+
+    # فحص الأنماط الفردية
+    for pattern, description in DANGEROUS_PATTERNS:
+        if re.search(pattern, content, re.IGNORECASE):
+            threats.append(description)
+
+    # فحص مجموعات الأنماط (الأخطر)
+    for pattern_group, description in DANGEROUS_COMBINATIONS:
+        if all(re.search(p, content, re.IGNORECASE) for p in pattern_group):
+            combo_threat = f"{description}"
+            if combo_threat not in threats:
+                threats.insert(0, combo_threat)  # في الأول عشان أهم
+
+    is_safe = len(threats) == 0
+    if not is_safe:
+        logger.warning(f"Security scan blocked '{file_name}': {threats}")
+    return is_safe, threats
+# --- End Security Scanner ---
+
+
 # --- Database Operations ---
 DB_LOCK = threading.Lock() 
 
@@ -930,7 +1020,8 @@ def create_control_buttons(script_owner_id, file_name, is_running=True): # Param
             types.InlineKeyboardButton("📜 عرض السجلات", callback_data=f'logs_{script_owner_id}_{file_name}')
         )
     markup.row(
-        types.InlineKeyboardButton("📥 تحديث الملف", callback_data=f'update_{script_owner_id}_{file_name}')
+        types.InlineKeyboardButton("📥 تحديث الملف", callback_data=f'update_{script_owner_id}_{file_name}'),
+        types.InlineKeyboardButton("🔑 تغيير التوكن", callback_data=f'chtoken_{script_owner_id}_{file_name}')
     )
     markup.add(types.InlineKeyboardButton("🔙 العودة إلى الملفات", callback_data='check_files'))
     return markup
@@ -942,6 +1033,18 @@ def create_admin_panel():
         types.InlineKeyboardButton('➖ إزالة أدمن', callback_data='remove_admin')
     )
     markup.row(types.InlineKeyboardButton('📋 قائمة الأدمن', callback_data='list_admins'))
+    markup.row(
+        types.InlineKeyboardButton('🚫 حظر مستخدم', callback_data='ban_user_panel'),
+        types.InlineKeyboardButton('✅ فك حظر مستخدم', callback_data='unban_user_panel')
+    )
+    markup.row(
+        types.InlineKeyboardButton('🔒 قفل البوت', callback_data='lock_bot_panel'),
+        types.InlineKeyboardButton('🔓 فتح البوت', callback_data='unlock_bot_panel')
+    )
+    markup.row(
+        types.InlineKeyboardButton('🟢 تشغيل كل الأكواد', callback_data='run_all_scripts_panel'),
+        types.InlineKeyboardButton('🔄 تحديث الملف', callback_data='refresh_file')
+    )
     markup.row(types.InlineKeyboardButton('🔙 العودة إلى الرئيسي', callback_data='back_to_main'))
     return markup
 
@@ -1048,9 +1151,27 @@ def handle_zip_file(downloaded_file_content, file_name_zip, message):
             shutil.move(src_path, dest_path); moved_count +=1
         logger.info(f"Moved {moved_count} items to {user_folder}")
 
+        main_script_path = os.path.join(user_folder, main_script_name)
+
+        # Security scan before running
+        is_safe, threats = scan_file_security(main_script_path, main_script_name)
+        if not is_safe:
+            threats_text = "\n".join(f"• {t}" for t in threats)
+            bot.reply_to(message,
+                f"🚫 *تم رفض الملف `{main_script_name}` لأسباب أمنية!*\n\n"
+                f"*التهديدات المكتشفة:*\n{threats_text}\n\n"
+                f"⚠️ هذا الملف يحتوي على كود خطير ومحظور.",
+                parse_mode='Markdown')
+            logger.warning(f"SECURITY: Blocked ZIP main script '{main_script_name}' from user {user_id}. Threats: {threats}")
+            try:
+                bot.send_message(OWNER_ID,
+                    f"🚨 *تحذير أمني!*\nمستخدم `{user_id}` حاول رفع ملف خطير في ZIP: `{main_script_name}`\n"
+                    f"التهديدات:\n" + "\n".join(f"• {t}" for t in threats), parse_mode='Markdown')
+            except: pass
+            return
+
         save_user_file(user_id, main_script_name, file_type)
         logger.info(f"Saved main script '{main_script_name}' ({file_type}) for {user_id} from zip.")
-        main_script_path = os.path.join(user_folder, main_script_name)
         bot.reply_to(message, f"✅ تم استخراج الملفات. جاري تشغيل النص الرئيسي: `{main_script_name}`...", parse_mode='Markdown')
 
         # Use user_id as script_owner_id for script key context
@@ -1150,16 +1271,56 @@ def _logic_my_websites(message):
 
 def handle_js_file(file_path, script_owner_id, user_folder, file_name, message):
     try:
+        is_safe, threats = scan_file_security(file_path, file_name)
+        if not is_safe:
+            threats_text = "\n".join(f"• {t}" for t in threats)
+            bot.reply_to(message,
+                f"🚫 *تم رفض الملف `{file_name}` لأسباب أمنية!*\n\n"
+                f"*التهديدات المكتشفة:*\n{threats_text}\n\n"
+                f"⚠️ هذا الملف يحتوي على كود خطير ومحظور.",
+                parse_mode='Markdown')
+            logger.warning(f"SECURITY: Blocked JS file '{file_name}' from user {script_owner_id}. Threats: {threats}")
+            try:
+                bot.send_message(OWNER_ID,
+                    f"🚨 *تحذير أمني!*\nمستخدم `{script_owner_id}` حاول رفع ملف خطير: `{file_name}`\n"
+                    f"التهديدات:\n" + "\n".join(f"• {t}" for t in threats), parse_mode='Markdown')
+            except: pass
+            if os.path.exists(file_path): os.remove(file_path)
+            return
         save_user_file(script_owner_id, file_name, 'js')
         threading.Thread(target=run_js_script, args=(file_path, script_owner_id, user_folder, file_name, message)).start()
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔑 تغيير التوكن", callback_data=f'chtoken_{script_owner_id}_{file_name}'))
+        markup.add(types.InlineKeyboardButton("🔙 العودة إلى الملفات", callback_data='check_files'))
+        bot.send_message(message.chat.id, f"✅ تم رفع `{file_name}` بنجاح!\nعاوز تغير التوكن جوه الملف؟", reply_markup=markup, parse_mode='Markdown')
     except Exception as e:
         logger.error(f"❌ خطأ في معالجة ملف JS {file_name} لـ {script_owner_id}: {e}", exc_info=True)
         bot.reply_to(message, f"❌ خطأ في معالجة ملف JS: {str(e)}")
 
 def handle_py_file(file_path, script_owner_id, user_folder, file_name, message):
     try:
+        is_safe, threats = scan_file_security(file_path, file_name)
+        if not is_safe:
+            threats_text = "\n".join(f"• {t}" for t in threats)
+            bot.reply_to(message,
+                f"🚫 *تم رفض الملف `{file_name}` لأسباب أمنية!*\n\n"
+                f"*التهديدات المكتشفة:*\n{threats_text}\n\n"
+                f"⚠️ هذا الملف يحتوي على كود خطير ومحظور.",
+                parse_mode='Markdown')
+            logger.warning(f"SECURITY: Blocked Python file '{file_name}' from user {script_owner_id}. Threats: {threats}")
+            try:
+                bot.send_message(OWNER_ID,
+                    f"🚨 *تحذير أمني!*\nمستخدم `{script_owner_id}` حاول رفع ملف خطير: `{file_name}`\n"
+                    f"التهديدات:\n" + "\n".join(f"• {t}" for t in threats), parse_mode='Markdown')
+            except: pass
+            if os.path.exists(file_path): os.remove(file_path)
+            return
         save_user_file(script_owner_id, file_name, 'py')
         threading.Thread(target=run_script, args=(file_path, script_owner_id, user_folder, file_name, message)).start()
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔑 تغيير التوكن", callback_data=f'chtoken_{script_owner_id}_{file_name}'))
+        markup.add(types.InlineKeyboardButton("🔙 العودة إلى الملفات", callback_data='check_files'))
+        bot.send_message(message.chat.id, f"✅ تم رفع `{file_name}` بنجاح!\nعاوز تغير التوكن جوه الملف؟", reply_markup=markup, parse_mode='Markdown')
     except Exception as e:
         logger.error(f"❌ خطأ في معالجة ملف Python {file_name} لـ {script_owner_id}: {e}", exc_info=True)
         bot.reply_to(message, f"❌ خطأ في معالجة ملف Python: {str(e)}")
@@ -1322,13 +1483,23 @@ def _logic_send_welcome(message):
         if user_profile_photos.photos: photo_file_id = user_profile_photos.photos[0][-1].file_id
     except Exception: pass
 
+    # Escape underscores to avoid Markdown italic formatting breaking the username
+    safe_username = user_username.replace('_', '\\_') if user_username else None
+
     if user_id not in active_users:
         add_active_user(user_id)
         try:
-            owner_notification = (f"🎉 مستخدم جديد!\n👤 الاسم: {user_name}\n✳️ المستخدم: @{user_username or 'غير محدد'}\n"
-                                  f"🆔 المعرف: `{user_id}`\n📝 السيرة: {user_bio}")
-            bot.send_message(OWNER_ID, owner_notification, parse_mode='Markdown')
-            if photo_file_id: bot.send_photo(OWNER_ID, photo_file_id, caption=f"صورة المستخدم الجديد {user_id}")
+            owner_notification = (
+                f"🎉 مستخدم جديد!\n"
+                f"👤 الاسم: {user_name}\n"
+                f"✳️ اليوزر: @{safe_username if safe_username else 'مش موجود'}\n"
+                f"🆔 المعرف: `{user_id}`\n"
+                f"📝 السيرة: {user_bio}"
+            )
+            if photo_file_id:
+                bot.send_photo(OWNER_ID, photo_file_id, caption=owner_notification, parse_mode='Markdown')
+            else:
+                bot.send_message(OWNER_ID, owner_notification, parse_mode='Markdown')
         except Exception as e: logger.error(f"⚠️ فشل في إخطار المالك عن المستخدم الجديد {user_id}: {e}")
 
     file_limit = get_user_file_limit(user_id)
@@ -1342,11 +1513,11 @@ def _logic_send_welcome(message):
         if expiry_date and expiry_date > datetime.now():
             user_status = "⭐ مميز"; days_left = (expiry_date - datetime.now()).days
             expiry_info = f"\n⏳ ينتهي الاشتراك بعد: {days_left} أيام"
-        else: user_status = "🆓 مستخدم مجاني (انتهى الاشتراك)"; remove_subscription_db(user_id) # Clean up expired
+        else: user_status = "🆓 مستخدم مجاني (انتهى الاشتراك)"; remove_subscription_db(user_id)
     else: user_status = "🆓 مستخدم مجاني"
 
     welcome_msg_text = (f"〽️ مرحباً، {user_name}!\n\n🆔 معرف المستخدم: `{user_id}`\n"
-                        f"✳️ اسم المستخدم: `@{user_username or 'غير محدد'}`\n"
+                        f"✳️ اسم المستخدم: @{safe_username or 'غير محدد'}\n"
                         f"🔰 حالتك: {user_status}{expiry_info}\n"
                         f"📁 الملفات المرفوعة: {current_files} / {limit_str}\n\n"
                         f"🤖 استضافة وتشغيل نصوص Python (`.py`) أو JS (`.js`).\n"
@@ -1354,11 +1525,17 @@ def _logic_send_welcome(message):
                         f"👇 استخدم الأزرار أو اكتب الأوامر.")
     main_reply_markup = create_reply_keyboard_main_menu(user_id)
     try:
-        if photo_file_id: bot.send_photo(chat_id, photo_file_id)
-        bot.send_message(chat_id, welcome_msg_text, reply_markup=main_reply_markup, parse_mode='Markdown')
+        if photo_file_id:
+            try:
+                bot.send_photo(chat_id, photo_file_id, caption=welcome_msg_text, reply_markup=main_reply_markup, parse_mode='Markdown')
+            except Exception as photo_e:
+                logger.error(f"فشل إرسال الصورة مع caption لـ {user_id}: {photo_e}")
+                bot.send_message(chat_id, welcome_msg_text, reply_markup=main_reply_markup, parse_mode='Markdown')
+        else:
+            bot.send_message(chat_id, welcome_msg_text, reply_markup=main_reply_markup, parse_mode='Markdown')
     except Exception as e:
         logger.error(f"خطأ في إرسال الترحيب إلى {user_id}: {e}", exc_info=True)
-        try: bot.send_message(chat_id, welcome_msg_text, reply_markup=main_reply_markup, parse_mode='Markdown') # Fallback without photo
+        try: bot.send_message(chat_id, welcome_msg_text, reply_markup=main_reply_markup)
         except Exception as fallback_e: logger.error(f"فشل في الإرسال الاحتياطي لـ {user_id}: {fallback_e}")
 
 def _logic_updates_channel(message):
@@ -1668,7 +1845,6 @@ def command_show_status(message): _logic_statistics(message) # Changed to call _
 
 
 BUTTON_TEXT_TO_LOGIC = {
-    "🔄 تحديث": _logic_refresh,
     "📢 قناة التحديثات": _logic_updates_channel,
     "📤 رفع ملف": _logic_upload_file,
     "📂 فحص الملفات": _logic_check_files,
@@ -1678,8 +1854,6 @@ BUTTON_TEXT_TO_LOGIC = {
     "💳 الاشتراكات": _logic_subscriptions_panel,
     "📢 بث رسالة": _logic_broadcast_init,
     "🔒 قفل البوت": _logic_toggle_lock_bot, 
-    "🚫 حظر مستخدم": _logic_ban_user_init,
-    "✅ فك حظر مستخدم": _logic_unban_user_init,
     "🟢 تشغيل كل الأكواد": _logic_run_all_scripts,
     "👑 لوحة الأدمن": _logic_admin_panel,
     "🌐 مواقعي": _logic_my_sites,
@@ -1867,6 +2041,7 @@ def handle_callbacks(call):
         elif data.startswith('delete_'): delete_bot_callback(call)
         elif data.startswith('logs_'): logs_bot_callback(call)
         elif data.startswith('update_'): update_bot_callback(call)
+        elif data.startswith('chtoken_'): chtoken_callback(call)
         elif data == 'speed': speed_callback(call)
         elif data == 'back_to_main': back_to_main_callback(call)
         elif data.startswith('confirm_broadcast_'): handle_confirm_broadcast(call)
@@ -1883,6 +2058,13 @@ def handle_callbacks(call):
         elif data == 'add_admin': owner_required_callback(call, add_admin_init_callback) 
         elif data == 'remove_admin': owner_required_callback(call, remove_admin_init_callback) 
         elif data == 'list_admins': admin_required_callback(call, list_admins_callback)
+        elif data == 'refresh_file': admin_required_callback(call, refresh_file_callback)
+        elif data == 'change_token': owner_required_callback(call, change_token_callback)
+        elif data == 'ban_user_panel': admin_required_callback(call, ban_user_panel_callback)
+        elif data == 'unban_user_panel': admin_required_callback(call, unban_user_panel_callback)
+        elif data == 'lock_bot_panel': admin_required_callback(call, lock_bot_panel_callback)
+        elif data == 'unlock_bot_panel': admin_required_callback(call, unlock_bot_panel_callback)
+        elif data == 'run_all_scripts_panel': admin_required_callback(call, run_all_scripts_panel_callback)
         elif data == 'add_subscription': admin_required_callback(call, add_subscription_init_callback) 
         elif data == 'remove_subscription': admin_required_callback(call, remove_subscription_init_callback) 
         elif data == 'check_subscription': admin_required_callback(call, check_subscription_init_callback) 
@@ -2332,6 +2514,130 @@ def process_update_file(message, script_owner_id, file_name, file_type, expected
         bot.reply_to(message, f"❌ خطأ أثناء تحديث الملف: {e}")
 
 
+def chtoken_callback(call):
+    """User clicks 🔑 تغيير التوكن from file control or after upload"""
+    try:
+        _, script_owner_id_str, file_name = call.data.split('_', 2)
+        script_owner_id = int(script_owner_id_str)
+        requesting_user_id = call.from_user.id
+
+        if not (requesting_user_id == script_owner_id or requesting_user_id in admin_ids):
+            bot.answer_callback_query(call.id, "⚠️ رفض الإذن.", show_alert=True)
+            return
+
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(
+            call.message.chat.id,
+            f"🔑 أرسل التوكن الجديد اللي عاوز تحطه جوه `{file_name}`\n\n"
+            f"⚠️ البوت هيتوقف ويتشغل تاني بالتوكن الجديد تلقائياً.\n"
+            f"/cancel للإلغاء.",
+            parse_mode='Markdown'
+        )
+        bot.register_next_step_handler(msg, process_chtoken_file,
+            script_owner_id=script_owner_id, file_name=file_name,
+            original_message=call.message)
+    except (ValueError, IndexError) as e:
+        logger.error(f"Error parsing chtoken callback '{call.data}': {e}")
+        bot.answer_callback_query(call.id, "خطأ: بيانات غير صالحة.", show_alert=True)
+    except Exception as e:
+        logger.error(f"Error in chtoken_callback: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "حدث خطأ.", show_alert=True)
+
+
+def process_chtoken_file(message, script_owner_id, file_name, original_message):
+    """Replace TOKEN inside the uploaded bot file"""
+    requesting_user_id = message.from_user.id
+
+    if message.text and message.text.strip().lower() == '/cancel':
+        bot.reply_to(message, "❌ تم إلغاء تغيير التوكن.")
+        return
+
+    if not message.text:
+        bot.reply_to(message, "⚠️ أرسل التوكن كنص أو /cancel.")
+        msg = bot.send_message(message.chat.id, "🔑 أرسل التوكن الجديد أو /cancel.")
+        bot.register_next_step_handler(msg, process_chtoken_file,
+            script_owner_id=script_owner_id, file_name=file_name,
+            original_message=original_message)
+        return
+
+    new_token = message.text.strip()
+
+    # Validate token format
+    if not re.match(r'^\d+:[A-Za-z0-9_-]{35,}$', new_token):
+        bot.reply_to(message, "⚠️ التوكن غير صالح. تأكد من نسخه صح من BotFather.\n/cancel للإلغاء.")
+        msg = bot.send_message(message.chat.id, "🔑 أرسل التوكن الجديد أو /cancel.")
+        bot.register_next_step_handler(msg, process_chtoken_file,
+            script_owner_id=script_owner_id, file_name=file_name,
+            original_message=original_message)
+        return
+
+    try:
+        # Delete the token message for security
+        try: bot.delete_message(message.chat.id, message.message_id)
+        except: pass
+
+        user_folder = get_user_folder(script_owner_id)
+        file_path = os.path.join(user_folder, file_name)
+
+        if not os.path.exists(file_path):
+            bot.reply_to(message, f"❌ الملف `{file_name}` مش موجود على الديسك. أعد رفعه.", parse_mode='Markdown')
+            return
+
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+
+        # Try replacing TOKEN in Python files: TOKEN = '...' or TOKEN = "..."
+        new_content = re.sub(
+            r"(TOKEN\s*=\s*['\"])([^'\"]+)(['\"])",
+            lambda m: f"{m.group(1)}{new_token}{m.group(3)}",
+            content
+        )
+        # Also handle JS: const TOKEN = '...' or token: '...'
+        if new_content == content:
+            new_content = re.sub(
+                r"((?:const|let|var)?\s*[Tt][Oo][Kk][Ee][Nn]\s*=\s*['\"])([^'\"]+)(['\"])",
+                lambda m: f"{m.group(1)}{new_token}{m.group(3)}",
+                content
+            )
+
+        if new_content == content:
+            bot.send_message(message.chat.id,
+                "⚠️ ما لقيتش متغير `TOKEN` في الملف.\n"
+                "تأكد إن الملف فيه سطر زي:\n`TOKEN = 'توكن_قديم'`",
+                parse_mode='Markdown')
+            return
+
+        with open(file_path, 'w', encoding='utf-8', errors='ignore') as f:
+            f.write(new_content)
+
+        logger.info(f"Token replaced in '{file_name}' for user {script_owner_id}")
+
+        # Stop and restart if running
+        script_key = f"{script_owner_id}_{file_name}"
+        was_running = is_bot_running(script_owner_id, file_name)
+        if was_running:
+            process_info = bot_scripts.get(script_key)
+            if process_info: kill_process_tree(process_info)
+            if script_key in bot_scripts: del bot_scripts[script_key]
+            time.sleep(1)
+
+        bot.send_message(message.chat.id, f"✅ تم تغيير التوكن في `{file_name}` بنجاح!", parse_mode='Markdown')
+
+        if was_running:
+            file_info = next((f for f in user_files.get(script_owner_id, []) if f[0] == file_name), None)
+            if file_info:
+                file_type = file_info[1]
+                bot.send_message(message.chat.id, f"🔄 جاري إعادة تشغيل `{file_name}`...", parse_mode='Markdown')
+                if file_type == 'py':
+                    threading.Thread(target=run_script, args=(file_path, script_owner_id, user_folder, file_name, message)).start()
+                elif file_type == 'js':
+                    threading.Thread(target=run_js_script, args=(file_path, script_owner_id, user_folder, file_name, message)).start()
+
+    except Exception as e:
+        logger.error(f"Error replacing token in '{file_name}': {e}", exc_info=True)
+        bot.send_message(message.chat.id, f"❌ خطأ أثناء تغيير التوكن: {e}")
+
+
 def delete_bot_callback(call):
     try:
         _, script_owner_id_str, file_name = call.data.split('_', 2)
@@ -2653,6 +2959,200 @@ def execute_broadcast(broadcast_text, photo_id, video_id, caption, admin_chat_id
     logger.info(result_msg)
     try: bot.send_message(admin_chat_id, result_msg)
     except Exception as e: logger.error(f"Failed to send broadcast result to admin {admin_chat_id}: {e}")
+
+def refresh_file_callback(call):
+    """Admin clicks 🔄 تحديث الملف from admin panel - updates the main bot file itself"""
+    user_id = call.from_user.id
+    if user_id not in admin_ids:
+        bot.answer_callback_query(call.id, "⚠️ للأدمن فقط.", show_alert=True)
+        return
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(
+        call.message.chat.id,
+        "📥 *تحديث البوت الرئيسي*\n\n"
+        "أرسل ملف `.py` الجديد للبوت وسيتم استبداله وإعادة التشغيل تلقائياً.\n"
+        "أو أرسل /cancel للإلغاء.",
+        parse_mode='Markdown'
+    )
+    bot.register_next_step_handler(msg, process_self_update, original_message=call.message)
+
+def process_self_update(message, original_message):
+    """Handle the new bot file sent by admin to replace the main bot script"""
+    user_id = message.from_user.id
+    if user_id not in admin_ids:
+        bot.reply_to(message, "⚠️ غير مصرح لك.")
+        return
+
+    if message.text and message.text.strip().lower() == '/cancel':
+        bot.reply_to(message, "❌ تم إلغاء التحديث.")
+        return
+
+    if not message.document:
+        bot.reply_to(message, "⚠️ أرسل ملف `.py` فقط أو /cancel للإلغاء.", parse_mode='Markdown')
+        msg = bot.send_message(message.chat.id, "📥 أرسل الملف الجديد أو /cancel.")
+        bot.register_next_step_handler(msg, process_self_update, original_message=original_message)
+        return
+
+    doc = message.document
+    sent_ext = os.path.splitext(doc.file_name or '')[1].lower()
+    if sent_ext != '.py':
+        bot.reply_to(message, f"⚠️ الملف يجب أن يكون `.py` وليس `{sent_ext}`.\nأو /cancel للإلغاء.", parse_mode='Markdown')
+        msg = bot.send_message(message.chat.id, "📥 أرسل ملف `.py` أو /cancel.")
+        bot.register_next_step_handler(msg, process_self_update, original_message=original_message)
+        return
+
+    try:
+        wait_msg = bot.reply_to(message, "⏳ جاري تحميل الملف الجديد...")
+        file_info_tg = bot.get_file(doc.file_id)
+        new_content = bot.download_file(file_info_tg.file_path)
+
+        # Path of the current running bot script
+        bot_script_path = os.path.abspath(__file__)
+
+        # Write new file content
+        with open(bot_script_path, 'wb') as f:
+            f.write(new_content)
+
+        logger.info(f"Main bot file updated by admin {user_id}. File: {bot_script_path}")
+        bot.edit_message_text("✅ تم استبدال ملف البوت بنجاح!\n🔄 جاري إعادة التشغيل...", message.chat.id, wait_msg.message_id)
+
+        # Restart the bot process
+        def do_restart():
+            time.sleep(2)
+            os.execv(sys.executable, [sys.executable, bot_script_path])
+
+        threading.Thread(target=do_restart, daemon=True).start()
+
+    except Exception as e:
+        logger.error(f"Error in process_self_update by admin {user_id}: {e}", exc_info=True)
+        bot.reply_to(message, f"❌ خطأ أثناء التحديث: {e}")
+
+def lock_bot_panel_callback(call):
+    """Admin clicks 🔒 قفل البوت from admin panel"""
+    global bot_locked
+    if bot_locked:
+        bot.answer_callback_query(call.id, "⚠️ البوت مقفل بالفعل.", show_alert=True)
+        return
+    bot.answer_callback_query(call.id)
+    bot_locked = True
+    logger.warning(f"البوت مقفل 🔒 من قبل الإدارة {call.from_user.id} عبر لوحة الأدمن.")
+    try:
+        bot.edit_message_text("🔒 تم قفل البوت بنجاح.", call.message.chat.id, call.message.message_id, reply_markup=create_admin_panel())
+    except Exception:
+        bot.send_message(call.message.chat.id, "🔒 تم قفل البوت بنجاح.", reply_markup=create_admin_panel())
+
+def unlock_bot_panel_callback(call):
+    """Admin clicks 🔓 فتح البوت from admin panel"""
+    global bot_locked
+    if not bot_locked:
+        bot.answer_callback_query(call.id, "⚠️ البوت مفتوح بالفعل.", show_alert=True)
+        return
+    bot.answer_callback_query(call.id)
+    bot_locked = False
+    logger.warning(f"البوت مفتوح 🔓 من قبل الإدارة {call.from_user.id} عبر لوحة الأدمن.")
+    try:
+        bot.edit_message_text("🔓 تم فتح البوت بنجاح.", call.message.chat.id, call.message.message_id, reply_markup=create_admin_panel())
+    except Exception:
+        bot.send_message(call.message.chat.id, "🔓 تم فتح البوت بنجاح.", reply_markup=create_admin_panel())
+
+def run_all_scripts_panel_callback(call):
+    """Admin clicks 🟢 تشغيل كل الأكواد from admin panel"""
+    bot.answer_callback_query(call.id)
+    _logic_run_all_scripts(call)
+
+def ban_user_panel_callback(call):
+    """Admin clicks 🚫 حظر مستخدم from admin panel"""
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "🚫 أرسل معرف المستخدم لحظره.\n/cancel للإلغاء.")
+    bot.register_next_step_handler(msg, _process_ban_user_from_panel)
+
+def _process_ban_user_from_panel(message):
+    if message.from_user.id not in admin_ids:
+        bot.reply_to(message, "⚠️ غير مصرح لك."); return
+    if message.text.lower() == '/cancel':
+        bot.reply_to(message, "تم إلغاء الحظر.", reply_markup=create_admin_panel()); return
+    try:
+        target_id = int(message.text.strip())
+        if target_id == OWNER_ID:
+            bot.reply_to(message, "⚠️ لا يمكن حظر المالك."); return
+        if target_id in admin_ids:
+            bot.reply_to(message, "⚠️ لا يمكن حظر الأدمن."); return
+        if target_id in banned_users:
+            bot.reply_to(message, f"⚠️ المستخدم `{target_id}` محظور بالفعل.", parse_mode='Markdown'); return
+        if ban_user_db(target_id):
+            bot.reply_to(message, f"✅ تم حظر المستخدم `{target_id}` بنجاح.", parse_mode='Markdown', reply_markup=create_admin_panel())
+            try: bot.send_message(target_id, "🚫 تم حظرك من استخدام هذا البوت.")
+            except: pass
+        else:
+            bot.reply_to(message, "❌ فشل في الحظر.", reply_markup=create_admin_panel())
+    except ValueError:
+        bot.reply_to(message, "⚠️ معرف غير صالح. أرسل رقماً أو /cancel.")
+        msg = bot.send_message(message.chat.id, "🚫 أرسل معرف المستخدم أو /cancel.")
+        bot.register_next_step_handler(msg, _process_ban_user_from_panel)
+
+def unban_user_panel_callback(call):
+    """Admin clicks ✅ فك حظر مستخدم from admin panel"""
+    bot.answer_callback_query(call.id)
+    if not banned_users:
+        bot.send_message(call.message.chat.id, "✅ لا يوجد مستخدمون محظورون.", reply_markup=create_admin_panel()); return
+    banned_list = "\n".join(f"• `{uid}`" for uid in sorted(banned_users))
+    msg = bot.send_message(call.message.chat.id, f"✅ أرسل معرف المستخدم لفك حظره:\n\n{banned_list}\n\n/cancel للإلغاء.", parse_mode='Markdown')
+    bot.register_next_step_handler(msg, _process_unban_user_from_panel)
+
+def _process_unban_user_from_panel(message):
+    if message.from_user.id not in admin_ids:
+        bot.reply_to(message, "⚠️ غير مصرح لك."); return
+    if message.text.lower() == '/cancel':
+        bot.reply_to(message, "تم إلغاء فك الحظر.", reply_markup=create_admin_panel()); return
+    try:
+        target_id = int(message.text.strip())
+        if target_id not in banned_users:
+            bot.reply_to(message, f"⚠️ المستخدم `{target_id}` ليس محظوراً.", parse_mode='Markdown'); return
+        if unban_user_db(target_id):
+            bot.reply_to(message, f"✅ تم فك حظر المستخدم `{target_id}`.", parse_mode='Markdown', reply_markup=create_admin_panel())
+            try: bot.send_message(target_id, "✅ تم فك حظرك. يمكنك استخدام البوت الآن.")
+            except: pass
+        else:
+            bot.reply_to(message, "❌ فشل في فك الحظر.", reply_markup=create_admin_panel())
+    except ValueError:
+        bot.reply_to(message, "⚠️ معرف غير صالح. أرسل رقماً أو /cancel.")
+        msg = bot.send_message(message.chat.id, "✅ أرسل معرف المستخدم أو /cancel.")
+        bot.register_next_step_handler(msg, _process_unban_user_from_panel)
+
+def change_token_callback(call):
+    """Owner clicks 🔑 تغيير التوكن from admin panel"""
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(
+        call.message.chat.id,
+        "🔑 أرسل التوكن الجديد للبوت.\n\n⚠️ التوكن هيتحفظ في الذاكرة فقط حتى إعادة التشغيل.\nلتغيير دائم، حدّث متغير `TOKEN` في Railway.\n\n/cancel للإلغاء."
+    )
+    bot.register_next_step_handler(msg, process_change_token)
+
+def process_change_token(message):
+    if message.from_user.id != OWNER_ID:
+        bot.reply_to(message, "⚠️ للمالك فقط."); return
+    if message.text.strip().lower() == '/cancel':
+        bot.reply_to(message, "❌ تم إلغاء تغيير التوكن."); return
+    new_token = message.text.strip()
+    if not re.match(r'^\d+:[A-Za-z0-9_-]{35,}$', new_token):
+        bot.reply_to(message, "⚠️ التوكن غير صالح. تأكد من نسخه صح من BotFather.\n/cancel للإلغاء.")
+        msg = bot.send_message(message.chat.id, "🔑 أرسل التوكن الجديد أو /cancel.")
+        bot.register_next_step_handler(msg, process_change_token)
+        return
+    global TOKEN
+    TOKEN = new_token
+    bot.token = new_token
+    logger.warning(f"Token changed by Owner {message.from_user.id}")
+    try:
+        # Delete the token message for security
+        bot.delete_message(message.chat.id, message.message_id)
+    except: pass
+    bot.send_message(
+        message.chat.id,
+        "✅ تم تغيير التوكن في الذاكرة.\n\n"
+        "⚠️ لتغيير دائم بعد إعادة التشغيل، روح:\n"
+        "Railway → Variables → `TOKEN` → غيّر القيمة.",
+    )
 
 def admin_panel_callback(call):
     bot.answer_callback_query(call.id)
