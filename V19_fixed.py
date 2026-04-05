@@ -85,7 +85,7 @@ def keep_alive():
 # --- End Flask Keep Alive ---
 
 # --- Configuration ---
-TOKEN = '7978840901:AAGcbR-va4DyRi6vZ1-ZKz11AspEg-cwfFk' # توكن البوت
+TOKEN = '8553199423:AAH4NVlWl89ePPFr5XtOzage0WtRTLJEtrw' # توكن البوت
 OWNER_ID = 7970883512 # ID المالك
 ADMIN_ID = 8206539702 # ID الأدمن
 YOUR_USERNAME = '@I_tt_6' # يوزر المالك
